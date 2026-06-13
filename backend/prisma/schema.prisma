@@ -1,0 +1,383 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Tenant {
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  name            String
+  description     String   @default("")
+  type            String   @default("waterpark")
+  currency        String   @default("USD")
+  timezone        String   @default("UTC")
+  customDomain    String?  @unique @map("custom_domain")
+  parkCode        String   @unique @default("99") @map("park_code") @db.VarChar(2)
+  isActive        Boolean  @default(true) @map("is_active")
+  smtp            Json     @default("{}")
+  rolePermissions Json     @default("{}") @map("role_permissions")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  users            User[]
+  ticketTypes      TicketType[]
+  orders           Order[]
+  parkDays         ParkDay[]
+  tickets          Ticket[]
+  membershipPlans  MembershipPlan[]
+  memberships      Membership[]
+  coupons          Coupon[]
+  bookings         Booking[]
+  scanLogs         ScanLog[]
+  auditLogs        AuditLog[]
+  parkRoles        ParkRole[]
+  supportTickets   SupportTicket[]
+
+  @@map("tenants")
+}
+
+model ParkRole {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  slug        String   @db.VarChar(48)
+  name        String
+  description String?  @db.VarChar(255)
+  permissions Json     @default("[]")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@map("park_roles")
+}
+
+model User {
+  id           String    @id @default(cuid())
+  tenantId     String?   @map("tenant_id")
+  email        String
+  passwordHash String    @map("password_hash")
+  firstName    String    @map("first_name")
+  lastName     String    @map("last_name")
+  role         String
+  avatarUrl    String?   @map("avatar_url")
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant       Tenant?        @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  refreshTokens RefreshToken[]
+  ordersCreated Order[]        @relation("OrderCreatedBy")
+  ticketsScanned Ticket[]       @relation("TicketScannedBy")
+  scanLogs      ScanLog[]       @relation("ScanByUser")
+  parkDaysUpdated ParkDay[]     @relation("ParkDayUpdatedBy")
+  auditLogs     AuditLog[]
+  supportTicketsCreated SupportTicket[] @relation("SupportTicketCreatedBy")
+  supportMessages       SupportTicketMessage[]
+  passwordResetTokens   PasswordResetToken[]
+
+  @@unique([tenantId, email])
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, tokenHash])
+  @@map("password_reset_tokens")
+}
+
+model SupportTicket {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  ticketNumber  String   @map("ticket_number")
+  subject       String
+  category      String   @default("general")
+  priority      String   @default("normal")
+  status        String   @default("open")
+  description   String   @db.Text
+  contactName   String   @map("contact_name")
+  contactEmail  String   @map("contact_email")
+  contactPhone  String?  @map("contact_phone")
+  browserInfo   String?  @map("browser_info") @db.VarChar(512)
+  pageUrl       String?  @map("page_url") @db.VarChar(512)
+  createdById   String   @map("created_by_id")
+  lastMessageAt DateTime @default(now()) @map("last_message_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User                   @relation("SupportTicketCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  messages  SupportTicketMessage[]
+
+  @@unique([tenantId, ticketNumber])
+  @@index([tenantId, status])
+  @@index([status, lastMessageAt])
+  @@map("support_tickets")
+}
+
+model SupportTicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String   @map("ticket_id")
+  authorId   String   @map("author_id")
+  authorType String   @map("author_type")
+  body       String   @db.Text
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User          @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([ticketId, createdAt])
+  @@map("support_ticket_messages")
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, tokenHash])
+  @@map("refresh_tokens")
+}
+
+model TicketType {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  slug        String   @map("slug") @db.VarChar(48)
+  description String?
+  price       Float
+  category    String   @default("general")
+  color       String   @default("#3B82F6")
+  isActive    Boolean  @default(true) @map("is_active")
+  maxPerOrder Int      @default(10) @map("max_per_order")
+  validDays   Int      @default(1) @map("valid_days")
+  sortOrder   Int      @default(0) @map("sort_order")
+  ticketSeq   Int      @default(0) @map("ticket_seq")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tickets  Ticket[]
+  bookings Booking[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId])
+  @@map("ticket_types")
+}
+
+model Order {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  orderNumber   String   @map("order_number")
+  orderDate     String?  @map("order_date")
+  customerName  String?  @map("customer_name")
+  customerEmail String?  @map("customer_email")
+  customerPhone String?  @map("customer_phone")
+  subtotal      Float    @default(0)
+  discount      Float    @default(0)
+  tax           Float    @default(0)
+  total         Float    @default(0)
+  status        String   @default("pending")
+  paymentMethod String?  @map("payment_method")
+  couponId      String?  @map("coupon_id")
+  createdById   String?  @map("created_by_id")
+  source        String   @default("pos")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  coupon    Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  createdBy User?   @relation("OrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  tickets   Ticket[]
+  bookings  Booking[]
+
+  @@unique([tenantId, orderNumber])
+  @@index([tenantId, orderDate])
+  @@map("orders")
+}
+
+model ParkDay {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  date        String
+  isOpen      Boolean  @default(true) @map("is_open")
+  note        String?
+  updatedById String?  @map("updated_by_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  updatedBy User?  @relation("ParkDayUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, date])
+  @@map("park_days")
+}
+
+model Ticket {
+  id           String    @id @default(cuid())
+  tenantId     String    @map("tenant_id")
+  orderId      String    @map("order_id")
+  ticketTypeId String    @map("ticket_type_id")
+  ticketCode   String    @map("ticket_code")
+  qrData       String    @map("qr_data")
+  status       String    @default("valid")
+  validFrom    DateTime  @default(now()) @map("valid_from")
+  validUntil   DateTime? @map("valid_until")
+  scannedAt    DateTime? @map("scanned_at")
+  scannedById  String?   @map("scanned_by_id")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order      Order      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)
+  scannedBy  User?      @relation("TicketScannedBy", fields: [scannedById], references: [id], onDelete: SetNull)
+  scanLogs   ScanLog[]
+
+  @@unique([tenantId, ticketCode])
+  @@index([tenantId, orderId])
+  @@map("tickets")
+}
+
+model MembershipPlan {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  name         String
+  description  String?
+  price        Float
+  durationDays Int      @default(365) @map("duration_days")
+  benefits     Json     @default("[]")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+
+  @@index([tenantId])
+  @@map("membership_plans")
+}
+
+model Membership {
+  id          String   @id @default(cuid())
+  tenantId    String   @map("tenant_id")
+  planId      String   @map("plan_id")
+  memberName  String   @map("member_name")
+  memberEmail String?  @map("member_email")
+  memberCode  String   @map("member_code")
+  qrData      String   @map("qr_data")
+  startsAt    DateTime @map("starts_at")
+  expiresAt   DateTime @map("expires_at")
+  isActive    Boolean  @default(true) @map("is_active")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan     MembershipPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  scanLogs ScanLog[]
+
+  @@unique([tenantId, memberCode])
+  @@map("memberships")
+}
+
+model Coupon {
+  id             String    @id @default(cuid())
+  tenantId       String    @map("tenant_id")
+  code           String
+  description    String?
+  discountType   String    @default("percentage") @map("discount_type")
+  discountValue  Float     @map("discount_value")
+  minOrderAmount Float     @default(0) @map("min_order_amount")
+  maxUses        Int?      @map("max_uses")
+  usedCount      Int       @default(0) @map("used_count")
+  validFrom      DateTime? @map("valid_from")
+  validUntil     DateTime? @map("valid_until")
+  isActive       Boolean   @default(true) @map("is_active")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([tenantId, code])
+  @@map("coupons")
+}
+
+model Booking {
+  id            String   @id @default(cuid())
+  tenantId      String   @map("tenant_id")
+  bookingNumber String   @map("booking_number")
+  customerName  String   @map("customer_name")
+  customerEmail String   @map("customer_email")
+  customerPhone String?  @map("customer_phone")
+  visitDate     DateTime @map("visit_date")
+  ticketTypeId  String   @map("ticket_type_id")
+  quantity      Int      @default(1)
+  total         Float
+  status        String   @default("pending")
+  orderId       String?  @map("order_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticketType TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)
+  order      Order?     @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, bookingNumber])
+  @@map("bookings")
+}
+
+model ScanLog {
+  id           String   @id @default(cuid())
+  tenantId     String   @map("tenant_id")
+  ticketId     String?  @map("ticket_id")
+  membershipId String?  @map("membership_id")
+  scannedById  String   @map("scanned_by_id")
+  result       String
+  message      String?
+  scannedAt    DateTime @default(now()) @map("scanned_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ticket     Ticket?     @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  membership Membership? @relation(fields: [membershipId], references: [id], onDelete: SetNull)
+  scannedBy  User        @relation("ScanByUser", fields: [scannedById], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, scannedAt])
+  @@map("scan_logs")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String?  @map("tenant_id")
+  userId     String?  @map("user_id")
+  action     String
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  details    Json     @default("{}")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
